@@ -1,0 +1,6 @@
+{
+  "name": "FC Auction Draft",
+  "description": "A real-time football player auction and team management game with dynamic bidding.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

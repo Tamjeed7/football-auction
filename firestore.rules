@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidSaveGame(data) {
+      return data.keys().hasAll(['userId', 'gameState', 'updatedAt']) 
+        && data.keys().size() >= 3 
+        && data.userId is string 
+        && data.userId.size() <= 128
+        && data.userId == request.auth.uid
+        && data.gameState is string
+        && data.gameState.size() <= 64
+        && (!('startingBudget' in data) || (data.startingBudget is number))
+        && (!('auctionQueue' in data) || (data.auctionQueue is string && data.auctionQueue.size() <= 200000))
+        && (!('bidders' in data) || (data.bidders is string && data.bidders.size() <= 200000))
+        && (!('transactions' in data) || (data.transactions is string && data.transactions.size() <= 200000))
+        && (!('auctionPhase' in data) || (data.auctionPhase is string && data.auctionPhase.size() <= 200000))
+        && (!('isPaused' in data) || (data.isPaused is bool));
+    }
+
+    match /games/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() 
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidSaveGame(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() 
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidSaveGame(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().userId == existing().userId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['gameState', 'startingBudget', 'auctionQueue', 'bidders', 'transactions', 'auctionPhase', 'isPaused', 'updatedAt']);
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+  }
+}

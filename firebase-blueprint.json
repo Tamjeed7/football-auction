@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "SaveGame": {
+      "title": "SaveGame",
+      "description": "Represents a saved game state for a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "gameState": { "type": "string" },
+        "startingBudget": { "type": "number" },
+        "auctionQueue": { "type": "string", "description": "JSON string of queue" },
+        "bidders": { "type": "string", "description": "JSON string of bidders" },
+        "transactions": { "type": "string", "description": "JSON string of transactions" },
+        "auctionPhase": { "type": "string", "description": "JSON string of auction phase" },
+        "isPaused": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["userId", "gameState", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "games/{userId}": {
+      "schema": "SaveGame",
+      "description": "Store the current game state per user"
+    }
+  }
+}
