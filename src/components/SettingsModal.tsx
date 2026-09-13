@@ -1,17 +1,13 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { X, Bell, BellOff, Trophy, Zap, MonitorPlay, Gamepad2, Rocket, Volume2, VolumeX, Sparkles, AlertTriangle, LogOut, RotateCcw } from 'lucide-react';
+import { motion } from 'motion/react';
+import { X, Bell, BellOff, Volume2, VolumeX, Sparkles, AlertTriangle, LogOut, LogIn, RotateCcw, Sun, Moon, Laptop, UserCircle2 } from 'lucide-react';
 
-export type ThemeType = 'ultimate' | 'cyber' | 'gold' | 'classic' | 'fc26' | 'retro' | 'galactic';
+export type ThemeType = 'light' | 'dark' | 'system';
 
-export const THEMES: { id: ThemeType; name: string; description: string; icon: React.ReactNode; preview: string }[] = [
-  { id: 'ultimate', name: 'Ultimate Stadium', description: 'Neon lights, glass panels, transfer market energy.', icon: <Zap size={16} />, preview: 'bg-gradient-to-r from-brand1 to-brand2' },
-  { id: 'fc26', name: 'FC 26 Pro', description: 'Next-gen design with volt green, geometric textures, and deep contrast.', icon: <MonitorPlay size={16} />, preview: 'bg-gradient-to-r from-[#ccff00] to-[#00e5ff]' },
-  { id: 'cyber', name: 'Cyber Football', description: 'Futuristic holograms, neon greens and cyber blues.', icon: <MonitorPlay size={16} />, preview: 'bg-gradient-to-r from-[#00ffcc] to-[#0088ff]' },
-  { id: 'gold', name: 'World Cup Premium', description: 'Luxury gold lighting, trophy aesthetics, warm ambient.', icon: <Trophy size={16} />, preview: 'bg-gradient-to-r from-[#ffd700] to-[#ffaa00]' },
-  { id: 'classic', name: 'Classic FC', description: 'Clean stadium floodlights, green pitch, familiar UI.', icon: <span className="font-serif text-sm">FC</span>, preview: 'bg-gradient-to-r from-[#10b981] to-[#3b82f6]' },
-  { id: 'retro', name: 'Retro 8-Bit', description: 'Arcade style, vibrant magenta and cyan, scanline aesthetics.', icon: <Gamepad2 size={16} />, preview: 'bg-gradient-to-r from-[#ff00ff] to-[#00ffff]' },
-  { id: 'galactic', name: 'Galactic Strike', description: 'Deep space purple, starlight glow, cosmic vibes.', icon: <Rocket size={16} />, preview: 'bg-gradient-to-r from-[#9d4edd] to-[#ff9e00]' },
+const APPEARANCES: { id: ThemeType; name: string; icon: React.ReactNode }[] = [
+  { id: 'light', name: 'Ledger Paper', icon: <Sun size={16} /> },
+  { id: 'dark', name: 'Night Match', icon: <Moon size={16} /> },
+  { id: 'system', name: 'Match device', icon: <Laptop size={16} /> },
 ];
 
 interface SettingsModalProps {
@@ -29,16 +25,28 @@ interface SettingsModalProps {
   inGame?: boolean;
   onRestart?: () => void;
   onExit?: () => void;
+  currentUserEmail?: string | null;
+  onOpenAuth?: () => void;
+  onSignOut?: () => void;
 }
 
-export function SettingsModal({ 
-  theme: initialTheme, setTheme, 
-  notifications: initialNotifications, setNotifications, 
+function Toggle({ on }: { on: boolean }) {
+  return (
+    <div className={`w-10 h-5 rounded-full relative transition-colors shrink-0 ${on ? 'bg-red' : 'bg-rule-strong'}`}>
+      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[22px]' : 'left-0.5'}`}></div>
+    </div>
+  );
+}
+
+export function SettingsModal({
+  theme: initialTheme, setTheme,
+  notifications: initialNotifications, setNotifications,
   sfx: initialSfx, setSfx,
   vfx: initialVfx, setVfx,
   managerName: initialManagerName, setManagerName,
   inGame, onRestart, onExit,
-  onClose 
+  currentUserEmail, onOpenAuth, onSignOut,
+  onClose
 }: SettingsModalProps) {
   const [localTheme, setLocalTheme] = useState<ThemeType>(initialTheme);
   const [localNotifications, setLocalNotifications] = useState<boolean>(initialNotifications);
@@ -56,165 +64,165 @@ export function SettingsModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-brandbg/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
+    <div className="fixed inset-0 bg-[rgba(11,18,16,0.5)] backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.97 }}
         animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="glass-panel border border-white/20 rounded-3xl w-full max-w-2xl overflow-hidden neon-border shadow-[0_0_50px_rgba(0,0,0,0.8)] relative max-h-[90vh] flex flex-col"
+        exit={{ opacity: 0, scale: 0.97 }}
+        transition={{ duration: 0.18 }}
+        className="ledger-card w-full max-w-2xl overflow-hidden relative max-h-[90vh] flex flex-col"
       >
-        <div className="absolute top-0 right-0 w-64 h-64 bg-brand1 rounded-full blur-[100px] opacity-10 -mr-20 -mt-20 pointer-events-none"></div>
-        <div className="flex items-center justify-between p-6 border-b border-white/10 bg-black/40 relative z-10 shrink-0">
+        <div className="ledger-card-head shrink-0">
           <div>
-            <h2 className="text-2xl font-black uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-brand1 to-brand2">Settings</h2>
-            <p className="text-brand1/70 text-xs font-bold uppercase tracking-widest mt-1">Customize your experience</p>
+            <h2 className="text-xl font-semibold text-ink">Settings</h2>
+            <p className="ledger-tag mt-1">Manager preferences</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-brand3/20 rounded-full transition-colors text-gray-400 hover:text-brand3">
-            <X size={24} />
+          <button onClick={onClose} className="p-2 rounded-md hover:bg-[rgba(0,0,0,0.06)] transition-colors text-ink-muted hover:text-ink">
+            <X size={20} />
           </button>
         </div>
 
-        <div className="p-6 space-y-8 overflow-y-auto relative z-10 flex-1">
-          {/* Profile Settings */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest">Manager Profile</h3>
+        <div className="p-6 space-y-8 overflow-y-auto flex-1">
+          {/* Profile */}
+          <div className="space-y-3">
+            <h3 className="ledger-tag">Manager profile</h3>
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-gray-300">Manager Name</label>
-              <input 
-                type="text" 
+              <label className="text-sm font-semibold text-ink-muted">Manager name</label>
+              <input
+                type="text"
                 value={localManagerName}
                 onChange={(e) => setLocalManagerName(e.target.value)}
                 maxLength={20}
-                className="bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand1 focus:ring-1 focus:ring-brand1 transition-all w-full max-w-sm"
+                className="field-input w-full max-w-sm"
                 placeholder="Enter your name"
               />
             </div>
           </div>
 
-          {/* Preferences Toggle */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest">Preferences</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Notifications */}
-              <div 
+          {/* Account */}
+          <div className="space-y-3">
+            <h3 className="ledger-tag">Account</h3>
+            {currentUserEmail ? (
+              <div className="flex items-center justify-between p-4 rounded-md border border-rule">
+                <div className="flex items-center gap-3 min-w-0">
+                  <UserCircle2 size={22} className="text-ink-muted shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-[10.5px] text-ink-faint uppercase tracking-wide">Signed in as</div>
+                    <div className="font-semibold text-sm text-ink truncate">{currentUserEmail}</div>
+                  </div>
+                </div>
+                <button onClick={onSignOut} className="btn btn-secondary shrink-0" style={{ padding: '9px 14px' }}>
+                  <LogOut size={15} /> Sign out
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between p-4 rounded-md border border-rule">
+                <div>
+                  <div className="font-semibold text-sm text-ink">Not signed in</div>
+                  <div className="text-[10.5px] text-ink-faint uppercase tracking-wide">Sign in to save your progress to the cloud</div>
+                </div>
+                <button onClick={onOpenAuth} className="btn btn-primary shrink-0" style={{ padding: '9px 14px' }}>
+                  <LogIn size={15} /> Sign in
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Preferences */}
+          <div className="space-y-3">
+            <h3 className="ledger-tag">Preferences</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div
                 onClick={() => setLocalNotifications(!localNotifications)}
-                className="flex items-center justify-between p-4 rounded-xl border border-white/10 bg-black/40 cursor-pointer hover:bg-white/5 transition-all"
+                className="flex items-center justify-between p-4 rounded-md border border-rule cursor-pointer hover:bg-[rgba(0,0,0,0.03)] transition-all"
               >
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${localNotifications ? 'bg-brand1/20 text-brand1' : 'bg-gray-800 text-gray-400'}`}>
-                    {localNotifications ? <Bell size={20} /> : <BellOff size={20} />}
-                  </div>
+                  <div className="text-ink-muted">{localNotifications ? <Bell size={18} /> : <BellOff size={18} />}</div>
                   <div>
-                    <div className="font-bold">Alerts</div>
-                    <div className="text-[10px] text-gray-500 uppercase tracking-wider">Toast notifications</div>
+                    <div className="font-semibold text-sm">Alerts</div>
+                    <div className="text-[10.5px] text-ink-faint uppercase tracking-wide">Toast notifications</div>
                   </div>
                 </div>
-                <div className={`w-10 h-5 rounded-full relative transition-colors ${localNotifications ? 'bg-brand1' : 'bg-gray-700'}`}>
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${localNotifications ? 'left-[22px]' : 'left-0.5'}`}></div>
-                </div>
+                <Toggle on={localNotifications} />
               </div>
 
-              {/* SFX */}
-              <div 
+              <div
                 onClick={() => setLocalSfx(!localSfx)}
-                className="flex items-center justify-between p-4 rounded-xl border border-white/10 bg-black/40 cursor-pointer hover:bg-white/5 transition-all"
+                className="flex items-center justify-between p-4 rounded-md border border-rule cursor-pointer hover:bg-[rgba(0,0,0,0.03)] transition-all"
               >
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${localSfx ? 'bg-brand2/20 text-brand2' : 'bg-gray-800 text-gray-400'}`}>
-                    {localSfx ? <Volume2 size={20} /> : <VolumeX size={20} />}
-                  </div>
+                  <div className="text-ink-muted">{localSfx ? <Volume2 size={18} /> : <VolumeX size={18} />}</div>
                   <div>
-                    <div className="font-bold">Sound Effects</div>
-                    <div className="text-[10px] text-gray-500 uppercase tracking-wider">Bids, timers, alerts</div>
+                    <div className="font-semibold text-sm">Sound</div>
+                    <div className="text-[10.5px] text-ink-faint uppercase tracking-wide">Bids, timers</div>
                   </div>
                 </div>
-                <div className={`w-10 h-5 rounded-full relative transition-colors ${localSfx ? 'bg-brand2' : 'bg-gray-700'}`}>
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${localSfx ? 'left-[22px]' : 'left-0.5'}`}></div>
-                </div>
+                <Toggle on={localSfx} />
               </div>
 
-              {/* VFX */}
-              <div 
+              <div
                 onClick={() => setLocalVfx(!localVfx)}
-                className="flex items-center justify-between p-4 rounded-xl border border-white/10 bg-black/40 cursor-pointer hover:bg-white/5 transition-all"
+                className="flex items-center justify-between p-4 rounded-md border border-rule cursor-pointer hover:bg-[rgba(0,0,0,0.03)] transition-all"
               >
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${localVfx ? 'bg-brand3/20 text-brand3' : 'bg-gray-800 text-gray-400'}`}>
-                    <Sparkles size={20} className={localVfx ? 'animate-pulse' : ''} />
-                  </div>
+                  <div className="text-ink-muted"><Sparkles size={18} /></div>
                   <div>
-                    <div className="font-bold">Visual Effects</div>
-                    <div className="text-[10px] text-gray-500 uppercase tracking-wider">Particles, glows, motion</div>
+                    <div className="font-semibold text-sm">Motion</div>
+                    <div className="text-[10.5px] text-ink-faint uppercase tracking-wide">Gavel &amp; reveal effects</div>
                   </div>
                 </div>
-                <div className={`w-10 h-5 rounded-full relative transition-colors ${localVfx ? 'bg-brand3' : 'bg-gray-700'}`}>
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${localVfx ? 'left-[22px]' : 'left-0.5'}`}></div>
-                </div>
+                <Toggle on={localVfx} />
               </div>
             </div>
           </div>
 
-          {/* Theme Selection */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest">Visual Theme</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {THEMES.map(t => (
-                <div 
-                  key={t.id}
-                  onClick={() => setLocalTheme(t.id)}
-                  className={`relative p-4 rounded-xl border cursor-pointer transition-all ${localTheme === t.id ? 'border-brand1 bg-brand1/10 shadow-[0_0_15px_rgba(var(--color-brand1),0.15)]' : 'border-white/10 bg-black/40 hover:bg-white/5'}`}
+          {/* Appearance */}
+          <div className="space-y-3">
+            <h3 className="ledger-tag">Appearance</h3>
+            <div className="segmented">
+              {APPEARANCES.map(a => (
+                <button
+                  key={a.id}
+                  onClick={() => setLocalTheme(a.id)}
+                  className={localTheme === a.id ? 'active' : ''}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, textTransform: 'none', letterSpacing: 0, fontFamily: 'var(--font-sans)', fontSize: 13 }}
                 >
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={`text-${localTheme === t.id ? 'brand1' : 'gray-400'}`}>
-                      {t.icon}
-                    </div>
-                    <div className="font-bold text-sm">{t.name}</div>
-                  </div>
-                  <div className="text-[10px] text-gray-500 mb-3 leading-tight min-h-[2.5rem]">{t.description}</div>
-                  <div className={`w-full h-2 rounded-full ${t.preview}`}></div>
-                  
-                  {localTheme === t.id && (
-                    <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-brand1 shadow-[0_0_8px_currentColor]"></div>
-                  )}
-                </div>
+                  {a.icon} {a.name}
+                </button>
               ))}
             </div>
           </div>
 
-          {/* Game Controls */}
+          {/* Danger zone */}
           {inGame && (
-             <div className="space-y-4 pt-4 border-t border-white/10">
-                <h3 className="text-xs font-black text-brand3 uppercase tracking-widest flex items-center gap-2"><AlertTriangle size={14} /> Danger Zone</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                   <button 
-                     onClick={() => { if(onRestart) onRestart(); onClose(); }}
-                     className="flex items-center justify-center gap-3 w-full p-4 rounded-xl border border-brand3/30 bg-brand3/5 text-brand3 hover:bg-brand3/20 transition-all font-bold uppercase tracking-widest text-xs"
-                   >
-                     <RotateCcw size={18} /> Restart Draft
-                   </button>
-                   <button 
-                     onClick={() => { if(onExit) onExit(); onClose(); }}
-                     className="flex items-center justify-center gap-3 w-full p-4 rounded-xl border border-gray-600/50 bg-black/50 text-gray-400 hover:bg-white/10 hover:text-white transition-all font-bold uppercase tracking-widest text-xs"
-                   >
-                     <LogOut size={18} /> Exit to Lobby
-                   </button>
-                </div>
-             </div>
+            <div className="space-y-3 pt-4 border-t border-rule">
+              <h3 className="ledger-tag flex items-center gap-2" style={{ color: 'var(--color-red)' }}><AlertTriangle size={13} /> Danger zone</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  onClick={() => { if (onRestart) onRestart(); onClose(); }}
+                  className="btn btn-danger-outline"
+                  style={{ padding: '12px 16px' }}
+                >
+                  <RotateCcw size={16} /> Restart draft
+                </button>
+                <button
+                  onClick={() => { if (onExit) onExit(); onClose(); }}
+                  className="btn btn-secondary"
+                  style={{ padding: '12px 16px' }}
+                >
+                  <LogOut size={16} /> Exit to lobby
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
-        <div className="p-6 border-t border-white/10 bg-black/60 relative z-10 shrink-0 flex justify-end gap-3 rounded-b-3xl">
-          <button 
-            onClick={onClose} 
-            className="px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-all"
-          >
+        <div className="p-5 border-t border-rule shrink-0 flex justify-end gap-3">
+          <button onClick={onClose} className="btn btn-ghost" style={{ padding: '11px 18px' }}>
             Cancel
           </button>
-          <button 
-            onClick={handleConfirm} 
-            className="px-8 py-3 bg-gradient-to-r from-brand1 to-brand2 text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-[0_0_20px_rgba(0,240,255,0.3)] hover:opacity-90 transition-all hover:scale-105"
-          >
-            Confirm Changes
+          <button onClick={handleConfirm} className="btn btn-primary" style={{ padding: '11px 20px' }}>
+            Confirm changes
           </button>
         </div>
       </motion.div>

@@ -1,72 +1,34 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Player, Bidder, AuctionPhase, GameState, Bid } from '../types';
+import { Player, Bidder, AuctionPhase, GameState } from '../types';
 import { PLAYERS, INITIAL_BUDGET } from '../data/players';
 import { getBotTransferReply, getBotRejectReply } from '../utils/botComments';
+import {
+  calculateBaseValue,
+  canBidOnPlayer,
+  getBotPlayerMultiplier,
+  createSeededRng,
+  decideAutoBid,
+  fastForwardConfigToProfile,
+  runInstantFastForwardDrain,
+  defaultFastForwardConfig,
+  FastForwardConfig
+} from '../lib/auctionEngine';
+
+export { canBidOnPlayer };
 
 const BOT_NAMES = ['Sir Alex', 'Pep', 'Carlo', 'Jurgen Klopp', 'Jose Mourinho'];
-
-function calculateBaseValue(player: Player): number {
-  const diff = Math.max(0, player.overall - 70);
-  return Math.floor(100_000 + Math.pow(diff, 2.3) * 10_000);
-}
-
-function getBotPlayerMultiplier(botId: string, playerId: string) {
-  let hash = 0;
-  const str = botId + playerId;
-  for (let i = 0; i < str.length; i++) hash = Math.imul(31, hash) + str.charCodeAt(i) | 0;
-  const rand = Math.abs(hash) / 2147483648; // 0 to 1
-  if (rand < 0.4) return 0; // 40% chance the bot completely ignores the player
-  return 0.8 + rand * 1.5;
-}
-
-const genericPos = (pos: string) => {
-  if (pos === 'GK') return 'GK';
-  if (['CB', 'LB', 'RB', 'LWB', 'RWB'].includes(pos)) return 'DEF';
-  if (['CDM', 'CM', 'CAM', 'LM', 'RM'].includes(pos)) return 'MID';
-  if (['CF', 'ST', 'LW', 'RW', 'SS'].includes(pos)) return 'ATT';
-  return 'MID';
-};
-
-export function canBidOnPlayer(bidderTeam: Player[], player: Player): { allowed: boolean; reason?: string } {
-  if (bidderTeam.length >= 23) return { allowed: false, reason: 'Roster Full (23 max)' };
-
-  const counts: Record<string, number> = { GK: 0, DEF: 0, MID: 0, ATT: 0 };
-  bidderTeam.forEach(p => counts[genericPos(p.position)]++);
-  
-  // Hypothetical new state if they win this player
-  counts[genericPos(player.position)]++;
-
-  // FIFA standards logic: 3 GKs ideally, max 4 maybe. Let's say max 4 GKs.
-  if (counts.GK > 4) return { allowed: false, reason: 'Max 4 GKs allowed' };
-  if (counts.DEF > 10) return { allowed: false, reason: 'Max 10 DEFs allowed' };
-  if (counts.MID > 10) return { allowed: false, reason: 'Max 10 MIDs allowed' };
-  if (counts.ATT > 8) return { allowed: false, reason: 'Max 8 ATTs allowed' };
-
-  const remainingSlots = 23 - (counts.GK + counts.DEF + counts.MID + counts.ATT);
-  
-  const minGK = 2; // At least 1 sub GK
-  const minDEF = 5;
-  const minMID = 5;
-  const minATT = 3;
-
-  const neededGK = Math.max(0, minGK - counts.GK);
-  const neededDEF = Math.max(0, minDEF - counts.DEF);
-  const neededMID = Math.max(0, minMID - counts.MID);
-  const neededATT = Math.max(0, minATT - counts.ATT);
-
-  const totalNeeded = neededGK + neededDEF + neededMID + neededATT;
-
-  if (remainingSlots < totalNeeded) {
-    return { allowed: false, reason: 'Must save slots for required positions' };
-  }
-
-  return { allowed: true };
-}
 
 export interface ToastMessage {
   id: string;
   message: string;
   type: 'info' | 'success' | 'error' | 'warning';
+}
+
+export interface FastForwardActivityEntry {
+  id: string;
+  playerName: string;
+  amount: number;
+  timestamp: number;
 }
 
 export function useAuctionGame() {
@@ -86,7 +48,7 @@ export function useAuctionGame() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  
+
   const [bidders, setBidders] = useState<Bidder[]>(() => [
     { id: 'user', name: localStorage.getItem('app-manager-name') || 'My Club', isUser: true, budget: INITIAL_BUDGET, team: [] },
     ...BOT_NAMES.map((name, i) => ({ id: `bot_${i}`, name, isUser: false, budget: INITIAL_BUDGET, team: [] }))
@@ -96,8 +58,22 @@ export function useAuctionGame() {
     setBidders(prev => prev.map(b => b.id === 'user' ? { ...b, name } : b));
   }, []);
 
+  // Portraits may only be changed on players in the user's own squad — this
+  // is enforced here, not just by hiding the edit affordance in the UI, so
+  // no caller can update another manager's player by mistake.
+  const setPlayerPortrait = useCallback((playerId: string, assetId: string | null) => {
+    setBidders(prev => prev.map(b => {
+      if (!b.isUser) return b;
+      if (!b.team.some(p => p.id === playerId)) return b;
+      return {
+        ...b,
+        team: b.team.map(p => p.id === playerId ? { ...p, customPortraitAssetId: assetId ?? undefined } : p)
+      };
+    }));
+  }, []);
+
   const [auctionQueue, setAuctionQueue] = useState<Player[]>([]);
-  
+
   const [auctionPhase, setAuctionPhase] = useState<AuctionPhase>({
     currentPlayerIndex: 0,
     state: 'IDLE',
@@ -110,12 +86,43 @@ export function useAuctionGame() {
   const [isPaused, setIsPaused] = useState(false);
   const togglePause = useCallback(() => setIsPaused(p => !p), []);
 
+  // ---------------------------------------------------------------------
+  // Fast-Forward: an opt-in auto-agent that bids on the user's behalf.
+  // Never bypasses canBidOnPlayer/budget checks (enforced by placeBid and
+  // by decideAutoBid/runInstantFastForwardDrain in the shared engine).
+  // ---------------------------------------------------------------------
+  const [fastForward, setFastForward] = useState<{ active: boolean; config: FastForwardConfig }>({
+    active: false,
+    config: defaultFastForwardConfig()
+  });
+  const [ffActivityLog, setFfActivityLog] = useState<FastForwardActivityEntry[]>([]);
+
+  const pushFfActivity = useCallback((entries: { playerName: string; amount: number }[]) => {
+    if (entries.length === 0) return;
+    setFfActivityLog(prev => {
+      const next = [
+        ...entries.map(e => ({ id: Date.now().toString() + Math.random(), playerName: e.playerName, amount: e.amount, timestamp: Date.now() })),
+        ...prev
+      ];
+      return next.slice(0, 5);
+    });
+  }, []);
+
+  const startFastForward = useCallback((config: FastForwardConfig) => {
+    setFfActivityLog([]);
+    setFastForward({ active: true, config });
+  }, []);
+
+  const stopFastForward = useCallback(() => {
+    setFastForward(prev => ({ ...prev, active: false }));
+  }, []);
+
   // Start the game
   const startGame = useCallback((budget: number) => {
     // Shuffle players
     const shuffled = [...PLAYERS].sort(() => 0.5 - Math.random());
     setAuctionQueue(shuffled);
-    
+
     // Reset bidders
     setBidders([
       { id: 'user', name: localStorage.getItem('app-manager-name') || 'My Club', isUser: true, budget, team: [] },
@@ -124,7 +131,9 @@ export function useAuctionGame() {
 
     setGameState('AUCTION');
     setStartingBudget(budget);
-    
+    setFastForward({ active: false, config: defaultFastForwardConfig() });
+    setFfActivityLog([]);
+
     setAuctionPhase({
       currentPlayerIndex: 0,
       state: 'BIDDING',
@@ -141,7 +150,7 @@ export function useAuctionGame() {
       if (prev.state !== 'BIDDING') return prev;
       if (prev.highestBidderId !== null && amount <= prev.currentBid) return prev;
       if (prev.highestBidderId === null && amount < prev.currentBid) return prev;
-      
+
       const currentBidders = biddersRef.current;
       const bidder = currentBidders.find(b => b.id === bidderId);
       if (!bidder || bidder.budget < amount || bidder.team.length >= 23) return prev; // Cannot afford or full team
@@ -161,13 +170,38 @@ export function useAuctionGame() {
     });
   }, [addToast]);
 
-  // Main game loop
+  // Refs for bot/FF logic to avoid constant interval reset
+  const phaseRef = useRef(auctionPhase);
+  const biddersRef = useRef(bidders);
+  const queueRef = useRef(auctionQueue);
+  const isPausedRef = useRef(isPaused);
+  const fastForwardRef = useRef(fastForward);
+
+  const consecutiveUnsoldRef = useRef(0);
+
+  useEffect(() => {
+    phaseRef.current = auctionPhase;
+    biddersRef.current = bidders;
+    queueRef.current = auctionQueue;
+    isPausedRef.current = isPaused;
+    fastForwardRef.current = fastForward;
+  }, [auctionPhase, bidders, auctionQueue, isPaused, fastForward]);
+
+  // Main countdown loop. Fast-Forward accelerates the tick by decrementing
+  // timeLeft faster instead of shortening the wall-clock interval itself
+  // (keeps the loop stable and testable rather than fighting setInterval's
+  // minimum granularity).
   useEffect(() => {
     if (gameState !== 'AUCTION' || auctionPhase.state !== 'BIDDING' || isPaused) return;
 
+    const decrementBy = !fastForward.active ? 1
+      : fastForward.config.speed === 'INSTANT' ? 999
+      : fastForward.config.speed === '4x' ? 4
+      : 2;
+
     const timer = setInterval(() => {
       setAuctionPhase((prev) => {
-        if (prev.timeLeft <= 1) {
+        if (prev.timeLeft <= decrementBy) {
           // Time up! Player sold or passed.
           return {
             ...prev,
@@ -175,27 +209,30 @@ export function useAuctionGame() {
             timeLeft: 0
           };
         }
-        return { ...prev, timeLeft: prev.timeLeft - 1 };
+        return { ...prev, timeLeft: prev.timeLeft - decrementBy };
       });
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [gameState, auctionPhase.state, isPaused]);
+  }, [gameState, auctionPhase.state, isPaused, fastForward.active, fastForward.config.speed]);
 
   // Handle sold / passed resolution
   useEffect(() => {
     if (gameState !== 'AUCTION') return;
-    
+
     if (auctionPhase.state === 'SOLD' || auctionPhase.state === 'UNSOLD') {
       const currentPlayer = auctionQueue[auctionPhase.currentPlayerIndex];
-      
+
       if (auctionPhase.state === 'SOLD' && auctionPhase.highestBidderId) {
         consecutiveUnsoldRef.current = 0;
-        
+
         const winner = biddersRef.current.find(b => b.id === auctionPhase.highestBidderId);
         if (winner) {
           if (winner.isUser) {
             addToast(`You signed ${currentPlayer.name}!`, 'success');
+            if (fastForwardRef.current.active) {
+              pushFfActivity([{ playerName: currentPlayer.name, amount: auctionPhase.currentBid }]);
+            }
           } else {
              addToast(`${currentPlayer.name} sold to ${winner.name}`, 'info');
           }
@@ -219,10 +256,15 @@ export function useAuctionGame() {
         addToast(`${currentPlayer.name} went unsold. Re-adding to pool.`, 'info');
       }
 
-      // Next player timeout
+      // Next player timeout — Fast-Forward shortens the review pause.
+      const reviewDelay = !fastForward.active ? 3000
+        : fastForward.config.speed === 'INSTANT' ? 250
+        : fastForward.config.speed === '4x' ? 750
+        : 1500;
+
       const to = setTimeout(() => {
         let newQueue = queueRef.current;
-        
+
         if (auctionPhase.state === 'UNSOLD') {
           const remainingBeforeReadd = queueRef.current.length - (auctionPhase.currentPlayerIndex + 1);
           if (consecutiveUnsoldRef.current <= remainingBeforeReadd) {
@@ -234,7 +276,13 @@ export function useAuctionGame() {
         const currentBidders = biddersRef.current;
         const allFull = currentBidders.every(b => b.team.length >= 23);
         const remaining = newQueue.length - (auctionPhase.currentPlayerIndex + 1);
-        
+
+        // Deliberately no "stop Fast-Forward once the user's squad is full"
+        // check here: once canBidOnPlayer fails for the user, decideAutoBid
+        // naturally stops producing bids for them on its own — Fast-Forward
+        // stays active and keeps accelerating the remaining bot-only lots
+        // instead of dropping the rest of the draft back to real-time speed.
+
         if (auctionPhase.currentPlayerIndex + 1 >= newQueue.length || allFull || consecutiveUnsoldRef.current > remaining) {
           setGameState('SUMMARY');
         } else {
@@ -248,32 +296,18 @@ export function useAuctionGame() {
             history: []
           });
         }
-      }, 3000); // 3 seconds to review result
+      }, reviewDelay);
 
       return () => clearTimeout(to);
     }
-  }, [auctionPhase.state, auctionQueue, auctionPhase.currentPlayerIndex, gameState, auctionPhase.highestBidderId, auctionPhase.currentBid, addToast]);
+  }, [auctionPhase.state, auctionQueue, auctionPhase.currentPlayerIndex, gameState, auctionPhase.highestBidderId, auctionPhase.currentBid, addToast, fastForward.active, fastForward.config, pushFfActivity]);
 
-  // Refs for bot logic to avoid constant interval reset
-  const phaseRef = useRef(auctionPhase);
-  const biddersRef = useRef(bidders);
-  const queueRef = useRef(auctionQueue);
-  const isPausedRef = useRef(isPaused);
-  
-  const consecutiveUnsoldRef = useRef(0);
-
-  useEffect(() => {
-    phaseRef.current = auctionPhase;
-    biddersRef.current = bidders;
-    queueRef.current = auctionQueue;
-    isPausedRef.current = isPaused;
-  }, [auctionPhase, bidders, auctionQueue, isPaused]);
-
-  // Bot logic
+  // Bot logic (unchanged from live play — Fast-Forward and Simulation never
+  // alter how the built-in bots decide to bid; only the user's own slot and,
+  // in Simulation mode, a fully separate headless engine are new).
   useEffect(() => {
     if (gameState !== 'AUCTION') return;
-    
-    // Run bot logic randomly
+
     const botTimer = setInterval(() => {
       const currentPhase = phaseRef.current;
       const currentBidders = biddersRef.current;
@@ -290,20 +324,20 @@ export function useAuctionGame() {
       currentBidders.forEach((bot) => {
         if (bot.isUser) return;
         if (currentPhase.highestBidderId === bot.id) return; // already winning
-        
+
         const bidCheck = canBidOnPlayer(bot.team, currentPlayer);
         if (!bidCheck.allowed) return; // Formation constraint prevents bot from bidding
-        
+
         const randomFactor = getBotPlayerMultiplier(bot.id, currentPlayer.id);
         const botMaxBid = Math.min(bot.budget, baseVal * randomFactor);
-        
+
         // Want to bid if max is greater than current bid
         if (botMaxBid > currentPhase.currentBid) {
           // Add some randomness so bots don't all bid instantly
           if (Math.random() > 0.4) {
             const increment = Math.max(500_000, Math.floor(currentPhase.currentBid * 0.05));
             let nextBid = currentPhase.currentBid + increment;
-            
+
             // Limit to budget constraint
             nextBid = Math.min(nextBid, bot.budget);
             if (nextBid > currentPhase.currentBid) {
@@ -317,6 +351,62 @@ export function useAuctionGame() {
     return () => clearInterval(botTimer);
   }, [gameState, placeBid]);
 
+  // Fast-Forward user auto-bid (2x / 4x). INSTANT speed is handled by the
+  // synchronous drain effect below instead, since at that speed there is no
+  // per-tick window worth reacting on.
+  useEffect(() => {
+    if (gameState !== 'AUCTION' || !fastForward.active) return;
+
+    const ffTimer = setInterval(() => {
+      const phase = phaseRef.current;
+      if (phase.state !== 'BIDDING' || isPausedRef.current) return;
+
+      const player = queueRef.current[phase.currentPlayerIndex];
+      const user = biddersRef.current.find(b => b.id === 'user');
+      if (!player || !user) return;
+
+      const profile = fastForwardConfigToProfile(fastForwardRef.current.config);
+      const amount = decideAutoBid({
+        bidder: user,
+        player,
+        currentBid: phase.currentBid,
+        highestBidderId: phase.highestBidderId,
+        profile
+      });
+
+      if (amount != null) {
+        placeBid('user', amount);
+      }
+    }, 900);
+
+    return () => clearInterval(ffTimer);
+  }, [gameState, fastForward.active, placeBid]);
+
+  // Fast-Forward INSTANT: synchronously drain the queue the moment a fresh
+  // lot begins (no bids placed yet), bypassing wall-clock timers entirely.
+  useEffect(() => {
+    if (gameState !== 'AUCTION' || !fastForward.active || fastForward.config.speed !== 'INSTANT') return;
+    if (auctionPhase.state !== 'BIDDING' || auctionPhase.highestBidderId !== null || isPaused) return;
+
+    const rng = createSeededRng();
+    const result = runInstantFastForwardDrain(auctionQueue, auctionPhase.currentPlayerIndex, bidders, 'user', fastForward.config, rng);
+
+    setAuctionQueue(result.queue);
+    setBidders(result.bidders);
+
+    const wonEntries = result.log
+      .filter(l => l.type === 'SOLD' && l.winnerId === 'user')
+      .map(l => ({ playerName: l.playerName, amount: l.amount || 0 }));
+    pushFfActivity(wonEntries);
+
+    // The drain now only stops once every squad is full or the queue is
+    // exhausted — either way the draft itself has concluded, not just the
+    // user's part in it.
+    setFastForward(prev => ({ ...prev, active: false }));
+    setGameState('SUMMARY');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState, fastForward.active, fastForward.config, auctionPhase.state, auctionPhase.highestBidderId, isPaused]);
+
   const resetGame = useCallback(() => {
     setGameState('LOBBY');
     setTransactions([]);
@@ -324,6 +414,8 @@ export function useAuctionGame() {
     setBidders(prev => prev.map(b => ({ ...b, team: [], budget: INITIAL_BUDGET })));
     setToasts([]);
     setIsPaused(false);
+    setFastForward({ active: false, config: defaultFastForwardConfig() });
+    setFfActivityLog([]);
   }, []);
 
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -340,7 +432,7 @@ export function useAuctionGame() {
     // Avoid state callback mutation
     let newTransaction: any = null;
     let rejectMsg: string | null = null;
-    
+
     setBidders(prev => {
       const manager1 = prev.find(b => b.id === manager1Id);
       const manager2 = prev.find(b => b.id === manager2Id);
@@ -402,7 +494,7 @@ export function useAuctionGame() {
       if (newTransaction) {
         nextPrev[m1Index] = nextM1;
         nextPrev[m2Index] = nextM2;
-        
+
         // Push transaction via timeout to avoid state update during render
         setTimeout(() => {
           setTransactions(t => [newTransaction, ...t]);
@@ -419,7 +511,7 @@ export function useAuctionGame() {
 
       if (rejectMsg) setTimeout(() => addToast(`${manager2.name}: "${rejectMsg}"`, 'error'), 0);
       else setTimeout(() => addToast(`Transfer rejected. Requirements not met.`, 'error'), 0);
-      
+
       return prev;
     });
 
@@ -489,6 +581,12 @@ export function useAuctionGame() {
     removeToast,
     updateManagerName,
     saveGameToCloud,
-    loadGameFromCloud
+    loadGameFromCloud,
+    fastForward,
+    ffActivityLog,
+    startFastForward,
+    stopFastForward,
+    setPlayerPortrait,
+    addToast
   };
 }

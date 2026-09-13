@@ -1,5 +1,7 @@
 export type Position = string;
 
+export type PortraitSource = 'GENERATED' | 'LICENSED_PHOTO' | 'USER_UPLOADED';
+
 export interface Player {
   id: string;
   name: string;
@@ -14,6 +16,8 @@ export interface Player {
   def: number;
   phy: number;
   image?: string;
+  /** Present only when a manager has replaced this player's portrait with their own upload. */
+  customPortraitAssetId?: string;
 }
 
 export interface Bidder {

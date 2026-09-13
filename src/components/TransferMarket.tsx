@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Bidder, Player } from '../types';
-import { PlayerCard } from './PlayerCard';
 import { formatMoney } from '../utils/format';
 import { X, ArrowRightLeft, DollarSign } from 'lucide-react';
 
@@ -10,9 +9,17 @@ interface TransferMarketProps {
   initialSelectedBotId?: string | null;
   onClose: () => void;
   onTransfer: (type: 'BUY' | 'SELL' | 'SWAP', manager1Id: string, manager2Id: string, amount: number, m1PlayerId?: string, m2PlayerId?: string, m1Comment?: string) => void;
+  onViewPlayer?: (player: Player, owner: Bidder) => void;
 }
 
-export function TransferMarket({ bidders, transactions = [], initialSelectedBotId, onClose, onTransfer }: TransferMarketProps) {
+const POSITION_GROUPS: Record<string, string[]> = {
+  GK: ['GK'],
+  DEF: ['CB', 'LB', 'RB', 'LWB', 'RWB'],
+  MID: ['CDM', 'CM', 'CAM', 'LM', 'RM'],
+  ATT: ['CF', 'ST', 'LW', 'RW', 'SS']
+};
+
+export function TransferMarket({ bidders, transactions = [], initialSelectedBotId, onClose, onTransfer, onViewPlayer }: TransferMarketProps) {
   const [manager1Id, setManager1Id] = useState<string>('user');
   const [manager2Id, setManager2Id] = useState<string>(initialSelectedBotId || bidders.filter(b => b.id !== 'user')[0]?.id || '');
   const [selectedM1PlayerId, setSelectedM1PlayerId] = useState<string | null>(null);
@@ -20,12 +27,25 @@ export function TransferMarket({ bidders, transactions = [], initialSelectedBotI
   const [amount, setAmount] = useState<string>('');
   const [comment, setComment] = useState<string>('');
   const [mode, setMode] = useState<'BUY' | 'SELL' | 'SWAP'>('BUY');
-  const [view, setView] = useState<'MARKET' | 'LOGS'>('MARKET');
+  const [view, setView] = useState<'MARKET' | 'LOGS' | 'SCOUT'>('MARKET');
+  const [scoutPosition, setScoutPosition] = useState<string>('ALL');
+  const [scoutSearch, setScoutSearch] = useState<string>('');
+  const [scoutMinRating, setScoutMinRating] = useState<number>(0);
 
   const manager1 = bidders.find(b => b.id === manager1Id);
   const manager2 = bidders.find(b => b.id === manager2Id);
 
   if (!manager1 || !manager2) return null;
+
+  const scoutSearchLower = scoutSearch.trim().toLowerCase();
+  const scoutResults = bidders.flatMap(b => b.team.map(p => ({ player: p, owner: b })))
+    .filter(({ player }) => {
+      if (scoutPosition !== 'ALL' && !POSITION_GROUPS[scoutPosition]?.includes(player.position)) return false;
+      if (player.overall < scoutMinRating) return false;
+      if (scoutSearchLower && !player.name.toLowerCase().includes(scoutSearchLower) && !player.club.toLowerCase().includes(scoutSearchLower) && !player.country.toLowerCase().includes(scoutSearchLower)) return false;
+      return true;
+    })
+    .sort((a, b) => b.player.overall - a.player.overall);
 
   const selectedM1Player = manager1.team.find(p => p.id === selectedM1PlayerId);
   const selectedM2Player = manager2.team.find(p => p.id === selectedM2PlayerId);
@@ -65,257 +85,326 @@ export function TransferMarket({ bidders, transactions = [], initialSelectedBotI
   const ovrDiff = predictedOvr - currentOvr;
   const budgetDiff = nextM1Budget - manager1.budget;
 
-  const getDiffColor = (diff: number) => {
-    if (diff > 0) return 'text-emerald-400';
-    if (diff < 0) return 'text-rose-400';
-    return 'text-gray-400';
+  const diffClass = (diff: number) => {
+    if (diff > 0) return 'text-green-strong';
+    if (diff < 0) return 'text-red';
+    return 'text-ink-muted';
   };
 
-  const hasValidAction = 
+  const hasValidAction =
     (mode === 'BUY' && selectedM2PlayerId) ||
     (mode === 'SELL' && selectedM1PlayerId) ||
     (mode === 'SWAP' && selectedM1PlayerId && selectedM2PlayerId);
 
   return (
-    <div className="fixed inset-0 bg-brandbg/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
-      <div className="glass-panel border border-white/20 rounded-3xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden neon-border shadow-[0_0_50px_rgba(0,0,0,0.8)]">
-        
+    <div className="fixed inset-0 bg-[rgba(11,18,16,0.5)] backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="ledger-card w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+
         {/* HEADER */}
-        <div className="flex items-center justify-between p-6 border-b border-white/10 shrink-0 bg-black/40">
+        <div className="ledger-card-head shrink-0">
           <div>
-            <div className="flex items-center gap-6">
-              <h2 className="text-2xl font-black uppercase tracking-widest text-white cursor-pointer" onClick={() => setView('MARKET')}>
-                <span className={view === 'MARKET' ? 'text-transparent bg-clip-text bg-gradient-to-r from-brand1 to-brand2' : 'text-gray-500 hover:text-white transition-colors'}>Transfer Market</span>
+            <div className="flex items-center gap-5">
+              <h2
+                className={`text-xl font-semibold cursor-pointer ${view === 'MARKET' ? 'text-ink' : 'text-ink-faint hover:text-ink'} transition-colors`}
+                onClick={() => setView('MARKET')}
+              >
+                Transfer Market
               </h2>
-              <h2 className="text-2xl font-black uppercase tracking-widest cursor-pointer mt-1" onClick={() => setView('LOGS')}>
-                <span className={view === 'LOGS' ? 'text-transparent bg-clip-text bg-gradient-to-r from-brand1 to-brand2' : 'text-gray-500 hover:text-white transition-colors'}>Logs</span>
+              <h2
+                className={`text-xl font-semibold cursor-pointer ${view === 'SCOUT' ? 'text-ink' : 'text-ink-faint hover:text-ink'} transition-colors`}
+                onClick={() => setView('SCOUT')}
+              >
+                Scout
+              </h2>
+              <h2
+                className={`text-xl font-semibold cursor-pointer ${view === 'LOGS' ? 'text-ink' : 'text-ink-faint hover:text-ink'} transition-colors`}
+                onClick={() => setView('LOGS')}
+              >
+                Logs
               </h2>
             </div>
-            <p className="text-brand1/70 text-xs font-bold uppercase tracking-widest mt-1">{view === 'MARKET' ? 'Trade or sell players with other managers' : 'Recent valid transactions'}</p>
+            <p className="ledger-tag mt-1">{view === 'MARKET' ? 'Trade or sell players with other managers' : view === 'SCOUT' ? 'Browse every player, on every team' : 'Recent valid transactions'}</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-brand3/20 rounded-full transition-colors text-gray-400 hover:text-brand3">
-            <X size={24} />
+          <button onClick={onClose} className="p-2 hover:bg-[rgba(0,0,0,0.06)] rounded-md transition-colors text-ink-faint hover:text-ink">
+            <X size={20} />
           </button>
         </div>
 
         {view === 'MARKET' ? (
-        <div className="flex overflow-hidden flex-1 backdrop-blur-sm bg-black/40">
-          {/* M1 SQUAD */}
-          <div className="w-1/3 border-r border-white/10 flex flex-col pt-2 block">
-            <div className="px-6 py-4 border-b border-white/10 shrink-0">
-               <select 
-                 className="w-full bg-brandbg border border-brand1 text-brand1 rounded-lg px-3 py-3 font-bold uppercase cursor-pointer hover:border-brand2 transition-colors focus:shadow-[0_0_10px_rgba(0,240,255,0.2)] text-xs tracking-wider outline-none"
-                 value={manager1Id}
-                 onChange={e => {
-                   setManager1Id(e.target.value);
-                   setSelectedM1PlayerId(null);
-                   if (e.target.value === manager2Id) {
-                     setManager2Id(bidders.find(b => b.id !== e.target.value)?.id || '');
-                     setSelectedM2PlayerId(null);
-                   }
-                 }}
-               >
-                 {bidders.map(b => (
-                   <option key={b.id} value={b.id}>{b.name} ({formatMoney(b.budget)})</option>
-                 ))}
-               </select>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {manager1.team.length === 0 && <p className="text-gray-500 italic text-sm">No players</p>}
-              {manager1.team.map(p => (
-                <div 
-                  key={p.id}
-                  onClick={() => setSelectedM1PlayerId(p.id)}
-                  className={`p-3 rounded-xl cursor-pointer border transition-all ${selectedM1PlayerId === p.id ? 'border-brand1 bg-brand1/10 shadow-[0_0_15px_rgba(0,240,255,0.15)]' : 'border-white/5 bg-black/50 hover:bg-white/5'} flex justify-between items-center group`}
-                >
-                  <div>
-                    <div className="text-sm font-black uppercase tracking-wider text-white group-hover:text-brand1 transition-colors">{p.name}</div>
-                    <div className="text-[10px] text-gray-400 font-bold tracking-widest mt-0.5">{p.position} | OVR <span className={p.overall >= 88 ? 'text-[gold]' : 'text-white'}>{p.overall}</span></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* ACTION CENTER */}
-          <div className="w-1/3 border-r border-white/10 flex flex-col p-6 bg-black/60 items-center justify-center gap-8 shadow-inner">
-             <div className="flex bg-black/80 rounded-xl p-1.5 w-full border border-white/10 shadow-[0_0_20px_rgba(0,0,0,0.5)]">
-                <button onClick={() => setMode('BUY')} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-lg transition-all ${mode === 'BUY' ? 'bg-brand1/20 text-brand1 shadow-[0_0_10px_rgba(0,240,255,0.3)]' : 'text-gray-500 hover:text-white'}`}>Buy</button>
-                <button onClick={() => setMode('SELL')} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-lg transition-all ${mode === 'SELL' ? 'bg-brand3/20 text-brand3 shadow-[0_0_10px_rgba(255,0,85,0.3)]' : 'text-gray-500 hover:text-white'}`}>Sell</button>
-                <button onClick={() => setMode('SWAP')} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-lg transition-all ${mode === 'SWAP' ? 'bg-brand2/30 text-[#b066ff] shadow-[0_0_10px_rgba(112,0,255,0.3)]' : 'text-gray-500 hover:text-white'}`}>Swap</button>
-             </div>
-
-             <div className="flex items-center gap-6 text-white w-full justify-center">
-               {mode === 'SELL' || mode === 'SWAP' ? (
-                 selectedM1Player ? <div className="text-center w-24"><p className="text-[9px] text-brand3 font-black uppercase tracking-[0.2em] mb-1">Give</p><p className="font-black text-sm uppercase">{selectedM1Player.name}</p></div> : <div className="text-gray-600 text-[10px] uppercase font-bold tracking-widest w-24 text-center">Select M1 player</div>
-               ) : <div className="text-gray-600 text-[10px] uppercase font-bold tracking-widest w-24 text-center">Cash offer</div>}
-
-               {(mode === 'SWAP' || mode === 'BUY') && <ArrowRightLeft className="text-brand2 animate-pulse" size={24} />}
-
-               {mode === 'BUY' || mode === 'SWAP' ? (
-                 selectedM2Player ? <div className="text-center w-24"><p className="text-[9px] text-brand1 font-black uppercase tracking-[0.2em] mb-1">Receive</p><p className="font-black text-sm uppercase">{selectedM2Player.name}</p></div> : <div className="text-gray-600 text-[10px] uppercase font-bold tracking-widest w-24 text-center">Select M2 player</div>
-               ) : <div className="text-gray-600 text-[10px] uppercase font-bold tracking-widest w-24 text-center">Cash returns</div>}
-             </div>
-
-             {(mode === 'BUY' || mode === 'SELL') && (
-               <div className="w-full relative">
-                 <label className="absolute -top-2.5 left-4 bg-[#0a0a0f] px-2 text-[10px] text-brand1 font-black uppercase tracking-[0.2em]">Amount</label>
-                 <div className="relative">
-                   <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
-                   <input
-                     type="text"
-                     value={amount}
-                     onChange={e => setAmount(e.target.value)}
-                     className="w-full bg-brandbg border border-white/20 rounded-xl py-4 pl-12 pr-4 text-white font-mono font-bold text-lg outline-none focus:border-brand1 transition-colors focus:shadow-[0_0_15px_rgba(0,240,255,0.2)]"
-                     placeholder="e.g. 50,000,000"
-                   />
-                 </div>
-               </div>
-             )}
-
-             <div className="w-full relative">
-                 <label className="absolute -top-2.5 left-4 bg-[#0a0a0f] px-2 text-[10px] text-brand1 font-black uppercase tracking-[0.2em]">Add a comment (Optional)</label>
-                 <input
-                   type="text"
-                   value={comment}
-                   onChange={e => setComment(e.target.value)}
-                   onKeyDown={e => {
-                     if (e.key === 'Enter') {
-                       e.preventDefault();
-                       handleAction();
-                     }
-                   }}
-                   className="w-full bg-brandbg border border-white/20 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-brand1 transition-colors"
-                   placeholder="Troll your opponent..."
-                 />
-             </div>
-
-             {hasValidAction && (
-               <div className="w-full bg-black/80 border border-white/10 rounded-xl p-4 text-sm shadow-[inset_0_0_20px_rgba(0,0,0,0.5)]">
-                 <h4 className="font-black text-[10px] text-gray-500 uppercase tracking-[0.2em] mb-3 text-center">Outcome Comparison</h4>
-                 <div className="flex justify-between items-center bg-white/5 p-3 rounded-lg mb-2">
-                   <div className="flex flex-col">
-                     <span className="text-[9px] text-gray-500 uppercase tracking-widest font-bold">Avg OVR (L)</span>
-                     <span className="font-black text-white text-xl">{currentOvr} <span className="text-gray-600 text-sm mx-2">→</span> {predictedOvr}</span>
-                   </div>
-                   <div className={`font-black text-lg ${getDiffColor(ovrDiff)} drop-shadow-[0_0_5px_currentColor]`}>
-                     {ovrDiff > 0 ? '+' : ''}{ovrDiff}
-                   </div>
-                 </div>
-                 <div className="flex justify-between items-center bg-white/5 p-3 rounded-lg">
-                   <div className="flex flex-col">
-                     <span className="text-[9px] text-gray-500 uppercase tracking-widest font-bold">Budget (L)</span>
-                     <span className="font-mono font-bold text-white text-sm">
-                       {formatMoney(manager1.budget)} <span className="text-gray-600 text-sm mx-1">→</span>
-                       <br />
-                       {formatMoney(nextM1Budget)}
-                     </span>
-                   </div>
-                   <div className={`font-mono font-black text-sm text-right ${getDiffColor(budgetDiff)} drop-shadow-[0_0_5px_currentColor]`}>
-                     {budgetDiff > 0 ? '+' : ''}{formatMoney(budgetDiff)}
-                   </div>
-                 </div>
-               </div>
-             )}
-
-             <button
-               onClick={handleAction}
-               className="w-full py-4 bg-gradient-to-r from-brand1 to-brand2 text-white font-black uppercase tracking-widest rounded-xl hover:opacity-90 transition-all shadow-[0_0_30px_rgba(112,0,255,0.4)] disabled:opacity-30 disabled:grayscale"
-               disabled={
-                 (mode === 'BUY' && (!selectedM2PlayerId || !amount)) ||
-                 (mode === 'SELL' && (!selectedM1PlayerId || !amount)) ||
-                 (mode === 'SWAP' && (!selectedM1PlayerId || !selectedM2PlayerId)) ||
-                 manager1Id === manager2Id
-               }
-             >
-               Submit Offer
-             </button>
-             <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold text-center px-4">Offers are resolved immediately based on manager valuations.</p>
-          </div>
-
-          {/* M2 SQUAD */}
-          <div className="w-1/3 flex flex-col pt-2 block">
-            <div className="px-6 py-4 border-b border-white/10 shrink-0">
-               <select 
-                 className="w-full bg-brandbg border border-white/20 rounded-lg px-3 py-3 text-white outline-none font-bold placeholder-gray-500 uppercase cursor-pointer hover:border-brand2 transition-colors focus:shadow-[0_0_10px_rgba(112,0,255,0.2)] text-xs tracking-wider"
-                 value={manager2Id}
-                 onChange={e => {
-                   setManager2Id(e.target.value);
-                   setSelectedM2PlayerId(null);
-                 }}
-               >
-                 {bidders.filter(b => b.id !== manager1Id).map(b => (
-                   <option key={b.id} value={b.id}>{b.name} ({formatMoney(b.budget)})</option>
-                 ))}
-               </select>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {manager2.team.length === 0 && <p className="text-gray-500 italic text-sm">No players</p>}
-              {manager2.team.map(p => (
-                <div 
-                  key={p.id}
-                  onClick={() => setSelectedM2PlayerId(p.id)}
-                  className={`p-3 rounded-xl cursor-pointer border transition-all ${selectedM2PlayerId === p.id ? 'border-brand2 bg-brand2/20 shadow-[0_0_15px_rgba(112,0,255,0.2)]' : 'border-white/5 bg-black/50 hover:bg-white/5'} flex justify-between items-center group`}
-                >
-                  <div>
-                    <div className="text-sm font-black uppercase tracking-wider text-white group-hover:text-[#b066ff] transition-colors">{p.name}</div>
-                    <div className="text-[10px] text-gray-400 font-bold tracking-widest mt-0.5">{p.position} | OVR <span className={p.overall >= 88 ? 'text-[gold]' : 'text-white'}>{p.overall}</span></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        ) : (
-          <div className="flex-1 overflow-y-auto p-6 bg-black/60 shadow-inner">
-             {transactions.length === 0 ? (
-               <div className="text-center text-gray-500 py-12 font-bold uppercase tracking-widest text-sm">No transactions yet</div>
-             ) : (
-               <div className="space-y-4 max-w-3xl mx-auto">
-                 {transactions.map(tx => {
-                    let desc = '';
-                    if (tx.type === 'BUY') {
-                       desc = `Bought ${tx.playerIn?.name} from ${tx.fromTeam}`;
-                    } else if (tx.type === 'SELL') {
-                       desc = `Sold ${tx.playerOut?.name} to ${tx.toTeam}`;
-                    } else if (tx.type === 'SWAP') {
-                       desc = `Swapped ${tx.playerOut?.name} for ${tx.playerIn?.name} with ${tx.toTeam}`;
+          <div className="flex overflow-hidden flex-1">
+            {/* M1 SQUAD */}
+            <div className="w-1/3 border-r border-rule flex flex-col">
+              <div className="px-5 py-4 border-b border-rule shrink-0">
+                <select
+                  className="field-select w-full text-xs"
+                  value={manager1Id}
+                  onChange={e => {
+                    setManager1Id(e.target.value);
+                    setSelectedM1PlayerId(null);
+                    if (e.target.value === manager2Id) {
+                      setManager2Id(bidders.find(b => b.id !== e.target.value)?.id || '');
+                      setSelectedM2PlayerId(null);
                     }
+                  }}
+                >
+                  {bidders.map(b => (
+                    <option key={b.id} value={b.id}>{b.name} ({formatMoney(b.budget)})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {manager1.team.length === 0 && <p className="text-ink-faint italic text-sm px-2">No players</p>}
+                {manager1.team.map(p => (
+                  <div
+                    key={p.id}
+                    onClick={() => setSelectedM1PlayerId(p.id)}
+                    className={`p-3 rounded-md cursor-pointer border transition-all ${selectedM1PlayerId === p.id ? 'border-red bg-[rgba(200,16,46,0.06)]' : 'border-rule hover:bg-[rgba(0,0,0,0.02)]'} flex justify-between items-center`}
+                  >
+                    <div>
+                      <div className="text-sm font-semibold text-ink">{p.name}</div>
+                      <div className="text-[10.5px] text-ink-muted mt-0.5 font-mono">{p.position} · OVR <span className={p.overall >= 88 ? 'text-gold-strong font-bold' : ''}>{p.overall}</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-                    return (
-                   <div key={tx.id} className="bg-brandbg border border-white/10 rounded-2xl p-6 flex items-center justify-between gap-4 hover:border-white/20 transition-all hover:bg-white/5">
-                      <div className="flex-1 text-white">
-                        <div className="text-[10px] text-gray-500 mb-2 font-black uppercase tracking-[0.2em]">{tx.type} • <span className="text-brand1">{new Date(tx.timestamp).toLocaleTimeString()}</span></div>
-                        <div className="font-black text-lg tracking-wide">{desc}</div>
+            {/* ACTION CENTER */}
+            <div className="w-1/3 border-r border-rule flex flex-col p-6 items-center justify-center gap-6">
+              <div className="segmented w-full">
+                <button onClick={() => setMode('BUY')} className={mode === 'BUY' ? 'active' : ''}>Buy</button>
+                <button onClick={() => setMode('SELL')} className={mode === 'SELL' ? 'active' : ''}>Sell</button>
+                <button onClick={() => setMode('SWAP')} className={mode === 'SWAP' ? 'active' : ''}>Swap</button>
+              </div>
+
+              <div className="flex items-center gap-5 w-full justify-center">
+                {mode === 'SELL' || mode === 'SWAP' ? (
+                  selectedM1Player ? (
+                    <div className="text-center w-24">
+                      <p className="ledger-tag mb-1" style={{ color: 'var(--color-red)' }}>Give</p>
+                      <p className="font-semibold text-sm text-ink">{selectedM1Player.name}</p>
+                    </div>
+                  ) : <div className="text-ink-faint text-[10.5px] uppercase tracking-wide font-semibold w-24 text-center">Select player</div>
+                ) : <div className="text-ink-faint text-[10.5px] uppercase tracking-wide font-semibold w-24 text-center">Cash offer</div>}
+
+                {(mode === 'SWAP' || mode === 'BUY') && <ArrowRightLeft className="text-ink-faint" size={20} />}
+
+                {mode === 'BUY' || mode === 'SWAP' ? (
+                  selectedM2Player ? (
+                    <div className="text-center w-24">
+                      <p className="ledger-tag mb-1" style={{ color: 'var(--color-green-strong)' }}>Receive</p>
+                      <p className="font-semibold text-sm text-ink">{selectedM2Player.name}</p>
+                    </div>
+                  ) : <div className="text-ink-faint text-[10.5px] uppercase tracking-wide font-semibold w-24 text-center">Select player</div>
+                ) : <div className="text-ink-faint text-[10.5px] uppercase tracking-wide font-semibold w-24 text-center">Cash returns</div>}
+              </div>
+
+              {(mode === 'BUY' || mode === 'SELL') && (
+                <div className="w-full relative">
+                  <label className="text-[10.5px] uppercase tracking-wide font-semibold text-ink-muted mb-1.5 block">Amount</label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" size={16} />
+                    <input
+                      type="text"
+                      value={amount}
+                      onChange={e => setAmount(e.target.value)}
+                      className="field-input w-full font-mono font-semibold"
+                      style={{ paddingLeft: 34 }}
+                      placeholder="e.g. 50,000,000"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="w-full relative">
+                <label className="text-[10.5px] uppercase tracking-wide font-semibold text-ink-muted mb-1.5 block">Comment (optional)</label>
+                <input
+                  type="text"
+                  value={comment}
+                  onChange={e => setComment(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAction();
+                    }
+                  }}
+                  className="field-input w-full text-sm"
+                  placeholder="Add a note for the other manager…"
+                />
+              </div>
+
+              {hasValidAction && (
+                <div className="w-full ledger-card p-4 text-sm">
+                  <h4 className="ledger-tag mb-3 text-center">Outcome comparison</h4>
+                  <div className="flex justify-between items-center p-3 rounded-md mb-2" style={{ background: 'rgba(0,0,0,0.03)' }}>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-ink-faint uppercase tracking-wide font-semibold">Avg OVR</span>
+                      <span className="font-bold text-ink text-lg font-mono">{currentOvr} <span className="text-ink-faint text-sm mx-1">→</span> {predictedOvr}</span>
+                    </div>
+                    <div className={`font-bold text-base font-mono ${diffClass(ovrDiff)}`}>
+                      {ovrDiff > 0 ? '+' : ''}{ovrDiff}
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center p-3 rounded-md" style={{ background: 'rgba(0,0,0,0.03)' }}>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-ink-faint uppercase tracking-wide font-semibold">Budget</span>
+                      <span className="font-mono font-semibold text-ink text-sm">
+                        {formatMoney(manager1.budget)} <span className="text-ink-faint text-sm mx-1">→</span>
+                        {formatMoney(nextM1Budget)}
+                      </span>
+                    </div>
+                    <div className={`font-mono font-bold text-sm text-right ${diffClass(budgetDiff)}`}>
+                      {budgetDiff > 0 ? '+' : ''}{formatMoney(budgetDiff)}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={handleAction}
+                className="btn btn-primary w-full"
+                style={{ padding: '14px' }}
+                disabled={
+                  !!((mode === 'BUY' && (!selectedM2PlayerId || !amount)) ||
+                  (mode === 'SELL' && (!selectedM1PlayerId || !amount)) ||
+                  (mode === 'SWAP' && (!selectedM1PlayerId || !selectedM2PlayerId)) ||
+                  manager1Id === manager2Id)
+                }
+              >
+                Submit offer
+              </button>
+              <p className="text-[10.5px] text-ink-faint uppercase tracking-wide font-semibold text-center px-4">Offers are resolved immediately based on manager valuations.</p>
+            </div>
+
+            {/* M2 SQUAD */}
+            <div className="w-1/3 flex flex-col">
+              <div className="px-5 py-4 border-b border-rule shrink-0">
+                <select
+                  className="field-select w-full text-xs"
+                  value={manager2Id}
+                  onChange={e => {
+                    setManager2Id(e.target.value);
+                    setSelectedM2PlayerId(null);
+                  }}
+                >
+                  {bidders.filter(b => b.id !== manager1Id).map(b => (
+                    <option key={b.id} value={b.id}>{b.name} ({formatMoney(b.budget)})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {manager2.team.length === 0 && <p className="text-ink-faint italic text-sm px-2">No players</p>}
+                {manager2.team.map(p => (
+                  <div
+                    key={p.id}
+                    onClick={() => setSelectedM2PlayerId(p.id)}
+                    className={`p-3 rounded-md cursor-pointer border transition-all ${selectedM2PlayerId === p.id ? 'border-green bg-[rgba(28,107,76,0.08)]' : 'border-rule hover:bg-[rgba(0,0,0,0.02)]'} flex justify-between items-center`}
+                  >
+                    <div>
+                      <div className="text-sm font-semibold text-ink">{p.name}</div>
+                      <div className="text-[10.5px] text-ink-muted mt-0.5 font-mono">{p.position} · OVR <span className={p.overall >= 88 ? 'text-gold-strong font-bold' : ''}>{p.overall}</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : view === 'SCOUT' ? (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <div className="p-5 border-b border-rule shrink-0 flex flex-wrap gap-3 items-center">
+              <div className="segmented" style={{ width: 260 }}>
+                {['ALL', 'GK', 'DEF', 'MID', 'ATT'].map(pos => (
+                  <button key={pos} className={scoutPosition === pos ? 'active' : ''} onClick={() => setScoutPosition(pos)}>{pos}</button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={scoutSearch}
+                onChange={e => setScoutSearch(e.target.value)}
+                placeholder="Search name, club, or nation…"
+                className="field-input flex-1"
+                style={{ minWidth: 180 }}
+              />
+              <div className="segmented" style={{ width: 220 }}>
+                {[{ label: 'Any', v: 0 }, { label: '80+', v: 80 }, { label: '85+', v: 85 }, { label: '90+', v: 90 }].map(o => (
+                  <button key={o.label} className={scoutMinRating === o.v ? 'active' : ''} onClick={() => setScoutMinRating(o.v)}>{o.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {scoutResults.map(({ player, owner }) => (
+                  <div
+                    key={`${owner.id}-${player.id}`}
+                    onClick={() => onViewPlayer?.(player, owner)}
+                    className="ledger-card p-3 cursor-pointer hover:border-rule-strong transition-colors"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-mono font-bold text-gold-strong">{player.overall}</span>
+                      <span className="chip chip-mid" style={{ fontSize: 9 }}>{player.position}</span>
+                    </div>
+                    <div className="text-sm font-semibold text-ink truncate">{player.name}</div>
+                    <div className="text-[10.5px] text-ink-faint truncate">{player.club}</div>
+                    <div className="text-[10px] text-ink-muted mt-1 truncate">{owner.name}</div>
+                  </div>
+                ))}
+                {scoutResults.length === 0 && (
+                  <div className="col-span-full text-center text-ink-faint py-12 font-semibold uppercase tracking-wide text-sm">No players match these filters</div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-6">
+            {transactions.length === 0 ? (
+              <div className="text-center text-ink-faint py-12 font-semibold uppercase tracking-wide text-sm">No transactions yet</div>
+            ) : (
+              <div className="space-y-3 max-w-3xl mx-auto">
+                {transactions.map(tx => {
+                  let desc = '';
+                  if (tx.type === 'BUY') {
+                    desc = `Bought ${tx.playerIn?.name} from ${tx.fromTeam}`;
+                  } else if (tx.type === 'SELL') {
+                    desc = `Sold ${tx.playerOut?.name} to ${tx.toTeam}`;
+                  } else if (tx.type === 'SWAP') {
+                    desc = `Swapped ${tx.playerOut?.name} for ${tx.playerIn?.name} with ${tx.toTeam}`;
+                  }
+
+                  return (
+                    <div key={tx.id} className="ledger-card p-5 flex items-center justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="ledger-tag mb-2">{tx.type} · {new Date(tx.timestamp).toLocaleTimeString()}</div>
+                        <div className="font-semibold text-ink text-base">{desc}</div>
                         {(tx.m1Comment || tx.m2Comment) && (
-                          <div className="mt-4 space-y-2 border-t border-white/10 pt-4">
-                             {tx.m1Comment && (
-                               <div className="text-sm">
-                                 <span className="font-black uppercase tracking-widest text-[#b066ff] mr-2">{tx.type === 'BUY' ? tx.toTeam : tx.fromTeam}:</span>
-                                 <span className="text-gray-300 italic">"{tx.m1Comment}"</span>
-                               </div>
-                             )}
-                             {tx.m2Comment && (
-                               <div className="text-sm">
-                                 <span className="font-black uppercase tracking-widest text-brand1 mr-2">{tx.type === 'BUY' ? tx.fromTeam : tx.toTeam}:</span>
-                                 <span className="text-gray-300 italic">"{tx.m2Comment}"</span>
-                               </div>
-                             )}
+                          <div className="mt-3 space-y-1.5 border-t border-rule pt-3">
+                            {tx.m1Comment && (
+                              <div className="text-sm">
+                                <span className="font-semibold text-ink-muted mr-2">{tx.type === 'BUY' ? tx.toTeam : tx.fromTeam}:</span>
+                                <span className="text-ink-muted italic">"{tx.m1Comment}"</span>
+                              </div>
+                            )}
+                            {tx.m2Comment && (
+                              <div className="text-sm">
+                                <span className="font-semibold text-ink-muted mr-2">{tx.type === 'BUY' ? tx.fromTeam : tx.toTeam}:</span>
+                                <span className="text-ink-muted italic">"{tx.m2Comment}"</span>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
                       {tx.type !== 'SWAP' && (
-                        <div className="text-right pl-6 border-l border-white/10">
-                          <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1 font-bold">Fee</div>
-                          <div className={`font-mono font-black text-lg drop-shadow-[0_0_5px_currentColor] ${tx.type === 'SELL' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        <div className="text-right pl-5 border-l border-rule">
+                          <div className="text-[10px] text-ink-faint uppercase tracking-wide mb-1 font-semibold">Fee</div>
+                          <div className={`font-mono font-bold text-base ${tx.type === 'SELL' ? 'text-green-strong' : 'text-red'}`}>
                             {tx.type === 'SELL' ? '+' : '-'}{formatMoney(tx.amount)}
                           </div>
                         </div>
                       )}
-                   </div>
-                 )})}
-               </div>
-             )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 

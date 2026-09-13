@@ -9,10 +9,17 @@ interface ToastContainerProps {
 }
 
 const icons = {
-  info: <Info className="text-blue-400" size={20} />,
-  success: <CheckCircle2 className="text-emerald-400" size={20} />,
-  error: <XCircle className="text-rose-400" size={20} />,
-  warning: <AlertCircle className="text-amber-400" size={20} />
+  info: <Info size={18} style={{ color: 'var(--color-ink-muted)' }} />,
+  success: <CheckCircle2 size={18} style={{ color: 'var(--color-green-strong)' }} />,
+  error: <XCircle size={18} style={{ color: 'var(--color-red)' }} />,
+  warning: <AlertCircle size={18} style={{ color: 'var(--color-gold-strong)' }} />
+};
+
+const accentVar = {
+  info: 'var(--color-rule-strong)',
+  success: 'var(--color-green)',
+  error: 'var(--color-red)',
+  warning: 'var(--color-gold)'
 };
 
 export function ToastContainer({ toasts, removeToast }: ToastContainerProps) {
@@ -22,23 +29,20 @@ export function ToastContainer({ toasts, removeToast }: ToastContainerProps) {
         {toasts.map(toast => (
           <motion.div
             key={toast.id}
-            initial={{ opacity: 0, y: 50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-            className={`pointer-events-auto flex items-center gap-3 p-4 rounded-xl shadow-[0_0_20px_rgba(0,0,0,0.5)] border bg-black/90 backdrop-blur-md ${
-              toast.type === 'success' ? 'border-emerald-500/30' :
-              toast.type === 'error' ? 'border-rose-500/30' :
-              toast.type === 'warning' ? 'border-amber-500/30' :
-              'border-blue-500/30'
-            }`}
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, transition: { duration: 0.15 } }}
+            transition={{ duration: 0.22 }}
+            className="receipt-toast pointer-events-auto"
+            style={{ borderLeftColor: accentVar[toast.type] }}
           >
             <div className="shrink-0">{icons[toast.type]}</div>
-            <div className="flex-1 text-sm font-bold text-white">{toast.message}</div>
-            <button 
+            <div className="flex-1 text-sm font-medium text-ink">{toast.message}</div>
+            <button
               onClick={() => removeToast(toast.id)}
-              className="shrink-0 text-gray-500 hover:text-white transition-colors"
+              className="shrink-0 text-ink-faint hover:text-ink transition-colors"
             >
-              <X size={16} />
+              <X size={15} />
             </button>
           </motion.div>
         ))}
